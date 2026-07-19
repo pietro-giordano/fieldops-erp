@@ -205,3 +205,296 @@ Vue components must have a single root element.
 - IMPORTANT: Activate `inertia-vue-development` when working with Inertia Vue client-side patterns.
 
 </laravel-boost-guidelines>
+
+=== project rules ===
+
+# Planning
+
+For every implementation:
+
+1. Inspect referenced files first.
+2. Analyze existing patterns.
+3. Explain the proposed solution.
+4. Highlight risks and concerns.
+5. List files to be modified.
+6. Provide implementation plan.
+7. Wait for approval before editing.
+
+If the user asks for analysis, suggestions, review, planning, or explanation, do not modify files.
+
+Only edit files when the user explicitly says:
+
+- proceed
+- implement
+- apply
+- edit
+- modify
+
+---
+
+# Project Context
+
+This application is called FieldOps ERP.
+
+FieldOps ERP is a management system for a plant-installation company (photovoltaic, plumbing, HVAC).
+
+This is a portfolio project. The evaluation criteria it must showcase, in order of priority:
+
+1. Data integrity — real foreign keys, snapshots on fiscal documents, append-only stock ledger.
+2. Concurrency correctness — fiscal numbering and stock operations must be safe under parallel requests.
+3. Architectural clarity — thin controllers, explicit state machines, typed frontend.
+
+When a shortcut conflicts with one of these, do not take the shortcut. Flag the conflict instead.
+
+The primary business domain includes:
+
+- leads and deals
+- customers and contacts
+- quotes, invoices, credit notes
+- products and stock movements
+- delivery notes (DDT)
+- jobs and construction sites
+
+---
+
+# Phase 1 Scope
+
+Phase 1 includes:
+
+- authentication
+- users, roles and permissions
+- CRM: leads, deals, customers, contacts
+- administration: quotes, invoices, credit notes with fiscal numbering
+- warehouse: products, DDTs, stock movements
+
+Phase 2 (do not implement unless explicitly requested):
+
+- jobs, construction sites, work items
+
+Do not introduce additional modules without approval.
+
+---
+
+# Preferred Packages
+
+Prefer these packages unless explicitly instructed otherwise:
+
+- Laravel Fortify for authentication
+- Inertia.js + Vue 3 + TypeScript for UI
+- Ziggy for named routes in the frontend
+- Spatie Permission for roles and permissions
+- Pest for testing
+- Larastan for static analysis
+
+Do not propose alternative third-party packages unless there is a strong technical reason.
+
+Do not add packages without asking.
+
+Laravel Boost generates framework-level guidelines for installed packages. This file covers only working method and domain rules; do not duplicate Boost guidelines here.
+
+---
+
+# Non-Negotiable Domain Rules
+
+- Money is stored as integer cents. Never float. No `double` columns, no `round()` chains.
+- A deal always has a `customer_id`. Leads never link to documents. `deals.lead_id` is provenance only.
+- Document numbers are assigned only at issue time, via `document_counters` (per type, per year) with `SELECT ... FOR UPDATE` inside the issuing transaction. Never at creation.
+- Issued documents (quotes, invoices, credit notes, DDTs) are immutable except for their status. Editing happens only in draft.
+- Documents snapshot customer data, product description and unit price at issue time. An invoice never changes because a price list changed.
+- Fiscal documents are never deleted. No soft deletes on fiscal documents. Cancellation is a state transition.
+- State machines are explicit: transitions validated in a dedicated class per document type; illegal transitions throw.
+- No `stock` column on products. Stock on hand = SUM of `stock_movements.quantity`. The ledger is append-only: movements are never updated or deleted; corrections are new adjustment rows.
+- No polymorphic relations (`morphs`). This project deliberately uses real foreign keys.
+- `database/schema.dbml` is the schema source of truth. If the implementation needs to diverge, update the DBML in the same commit and explain why.
+
+---
+
+# Architecture
+
+- Prefer Form Requests.
+- Prefer Policies.
+- Prefer PHP Enums.
+- Keep controllers thin: validate, call action, return Inertia response.
+- Prefer Actions (single-purpose invokable classes) over fat services.
+- Avoid Repository pattern unless explicitly requested.
+- Do not introduce tenancy packages or tenant infrastructure.
+
+---
+
+# Existing Patterns
+
+Follow existing project patterns before introducing new abstractions.
+
+Prefer consistency with the current codebase over theoretical best practices.
+
+If multiple solutions are valid, choose the one most consistent with surrounding code.
+
+---
+
+# Simplicity
+
+Prefer the simplest solution that satisfies the requirement.
+
+Do not introduce abstractions for anticipated future needs.
+
+Avoid premature optimization.
+
+Avoid overengineering.
+
+---
+
+# Domain Modeling
+
+Always model the business domain before designing the database.
+
+When requirements are ambiguous:
+
+- ask for clarification
+- avoid assumptions
+- avoid premature abstractions
+
+Do not introduce entities, relationships, workflows or statuses that are not part of the approved business domain.
+
+---
+
+# Roles
+
+Initial application roles:
+
+- superadmin
+- office
+- worker
+
+These represent application permissions.
+
+Do NOT confuse them with business roles on deals or construction sites (e.g. site manager, referent). Business roles belong to the domain and are independent from authentication.
+
+Do not introduce new application roles unless explicitly requested.
+
+---
+
+# Authorization
+
+Prefer Laravel Policies for business authorization.
+
+Permissions determine what a user can do.
+
+Assignments determine which business resources a user can access.
+
+Current business assignment:
+
+- Job (a worker only sees jobs assigned to them)
+
+Always enforce authorization server-side.
+
+Never rely only on frontend filtering.
+
+Test authorization rules for all critical business operations.
+
+---
+
+# Inertia & Vue Component Design
+
+- Inertia is not an API. No fetch/axios toward JSON endpoints: controllers return `Inertia::render()`, forms use `useForm()`.
+- Always `<script setup lang="ts">`. No Options API in new code.
+- `resources/js/Pages/` mirrors routes. `Components/` for reusable UI. `Composables/` for shared logic. `types/` for TypeScript interfaces.
+- Every page defines typed props: `defineProps<{ ... }>()` with interfaces from `types/`.
+- Shared data (auth user, flash, permissions) goes through `HandleInertiaRequests::share()` and is typed once as global `PageProps`.
+- Use Ziggy's `route()` helper for URLs. Never hardcode URLs in components.
+- After mutations prefer partial reloads: `router.reload({ only: [...] })`.
+- The client displays money amounts but never computes them for persistence. The server computes.
+- Keep components focused on a single responsibility. Extract child components when a component becomes too large.
+
+---
+
+# Eloquent Relationships
+
+Prefer Eloquent relationships over manual foreign key queries.
+
+Prefer expressive relationship names matching the domain.
+
+Use singular names for belongsTo / hasOne: customer(), deal(), invoice().
+
+Use plural names for hasMany / belongsToMany: deals(), invoiceLines(), stockMovements().
+
+Prefer eager loading to avoid N+1 queries.
+
+---
+
+# Testing
+
+New business logic should include tests.
+
+Every migration ships with a model factory.
+
+Concurrency-critical paths (fiscal numbering, stock movements, state transitions) get dedicated tests, written before the implementation.
+
+Test authorization rules and business visibility rules.
+
+Larastan must pass at the configured level.
+
+---
+
+# Naming & Localization
+
+Always use English naming for code-level identifiers.
+
+Never use Italian for:
+
+- classes
+- methods
+- variables
+- enums
+- routes
+- migrations
+- database tables
+- database columns
+- translation keys
+
+Domain terms with no clean English equivalent (e.g. DDT) keep their Italian acronym as an accepted domain word.
+
+Treat the application as multilingual.
+
+Never hardcode user-facing strings.
+
+Always use translation files.
+
+Default locale:
+
+- it
+
+Fallback locale:
+
+- en
+
+---
+
+# Enum Conventions
+
+Prefer PHP Enums over raw strings.
+
+Enum backing values must use lowercase strings.
+
+Map enums to VARCHAR columns with CHECK constraints, not MySQL ENUM.
+
+Prefer enum casts in Eloquent models.
+
+Business logic should rely on enum methods.
+
+Never display enum backing values directly.
+
+Always resolve labels through translations.
+
+---
+
+# UI Direction
+
+There is no Figma for this project.
+
+Target: clean, dense admin panel. Tailwind with semantic token names (brand, surface, muted, success, warning, danger). Avoid purely visual names.
+
+Prefer reusable wrappers for recurring patterns (buttons, inputs, tables, badges, modals, empty states, page headers, pagination).
+
+Keep wrappers thin unless the component is intentionally becoming a project-level primitive.
+
+Avoid duplicating complex markup across pages.
